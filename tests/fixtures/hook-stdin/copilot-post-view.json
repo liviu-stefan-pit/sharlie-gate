@@ -1,0 +1,5 @@
+{
+  "toolName": "view",
+  "toolArgs": { "path": "src/app.ts" },
+  "toolResult": { "resultType": "success", "textResultForLlm": "file body" }
+}

@@ -1,0 +1,7 @@
+{
+  "tools": [
+    { "names": ["Read", "read_file", "view", "read", "read_file_outline"], "kind": "read", "pathArgs": ["file_path", "path", "target_file", "file"] },
+    { "names": ["Edit", "MultiEdit", "Write", "edit", "create", "replace_string_in_file", "create_file", "write", "apply_patch", "expand_section_lines"], "kind": "edit", "pathArgs": ["file_path", "path", "target_file"] },
+    { "names": ["Bash", "bash", "shell", "powershell", "run_in_terminal"], "kind": "shell", "commandArgs": ["command", "cmd"] }
+  ]
+}

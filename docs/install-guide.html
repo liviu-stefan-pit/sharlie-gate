@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sharlie Gate install guide</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f6f4ef;
+      --ink: #1c1915;
+      --muted: #5c564c;
+      --line: #d9d2c5;
+      --card: #fffdf8;
+      --accent: #1f4d3a;
+      --warn: #7a3e12;
+      --warn-bg: #f8ead8;
+      --code: #f0ebe3;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #161411;
+        --ink: #f3efe6;
+        --muted: #b7b0a4;
+        --line: #3a342c;
+        --card: #211e1a;
+        --accent: #8fceb0;
+        --warn: #f0c08a;
+        --warn-bg: #3a2a1c;
+        --code: #2a261f;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 17px/1.55 "Segoe UI", "Helvetica Neue", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    main { max-width: 920px; margin: 0 auto; padding: 40px 20px 80px; }
+    h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 8px; }
+    h2 { font-size: 1.4rem; margin: 2.4rem 0 0.6rem; }
+    h3 { font-size: 1.1rem; margin: 1.6rem 0 0.4rem; }
+    p, li { color: var(--ink); }
+    .lede { font-size: 1.12rem; color: var(--muted); margin-top: 0; }
+    a { color: var(--accent); }
+    nav {
+      display: flex; flex-wrap: wrap; gap: 10px 16px;
+      padding: 12px 0 20px; border-bottom: 1px solid var(--line); margin-bottom: 24px;
+    }
+    nav a { text-decoration: none; }
+    nav a:hover { text-decoration: underline; }
+    section, .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 18px 20px;
+      margin: 16px 0;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+    th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+    th { font-size: 0.82rem; letter-spacing: 0.02em; color: var(--muted); }
+    code, pre {
+      font-family: Consolas, "SFMono-Regular", ui-monospace, monospace;
+      font-size: 0.88rem;
+    }
+    code { background: var(--code); padding: 0.1em 0.35em; border-radius: 4px; }
+    pre {
+      background: var(--code);
+      padding: 12px 14px;
+      border-radius: 8px;
+      overflow-x: auto;
+      line-height: 1.45;
+    }
+    .warn {
+      background: var(--warn-bg);
+      border: 1px solid var(--warn);
+      color: var(--ink);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+    .warn strong { color: var(--warn); }
+    .path { white-space: nowrap; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Sharlie Gate install guide</h1>
+  <p class="lede">What to run, what each command writes, how the pieces behave, and what to delete if you stop using it.</p>
+  <nav>
+    <a href="#need">What you need</a>
+    <a href="#build">Build</a>
+    <a href="#preview">Preview</a>
+    <a href="#install">Install</a>
+    <a href="#editors">Each editor</a>
+    <a href="#proxy">Proxy</a>
+    <a href="#works">How it works</a>
+    <a href="#check">Check</a>
+    <a href="#remove">Remove everything</a>
+  </nav>
+
+  <section id="need">
+    <h2>What you need</h2>
+    <p>Node.js <strong>24.11 or newer</strong>. Check with:</p>
+    <pre>node --version</pre>
+    <p>Sharlie Gate is a local program. It does not create an account and it does not phone home. The editors it can configure are the ones whose folders already exist in your user profile:</p>
+    <ul>
+      <li>Cursor</li>
+      <li>GitHub Copilot CLI (<code>~/.copilot</code>)</li>
+      <li>Claude Code</li>
+      <li>OpenAI Codex CLI</li>
+      <li>OpenCode</li>
+    </ul>
+    <p>VS Code and Copilot inside VS Code are optional and only change a project when you pass <code>--legacy-vscode</code> together with <code>--project</code>.</p>
+    <p>Paths below use your home folder. On Windows that is <code>%USERPROFILE%</code>. On macOS and Linux it is <code>~</code>. The same commands work on both.</p>
+  </section>
+
+  <section id="build">
+    <h2>Build it once</h2>
+    <p>From the Sharlie Gate folder:</p>
+    <pre>npm install
+npm run build
+node dist/sharlie-gate.mjs --version</pre>
+    <p><code>npm install</code> downloads the libraries this repo lists. <code>npm run build</code> writes <code>dist/sharlie-gate.mjs</code>, <code>dist/tree-sitter.wasm</code>, and <code>dist/grammars/</code>. The version line prints <code>sharlie-gate 0.1.0</code> when the build is usable.</p>
+    <p>Later, <code>init</code> copies that program into <code>~/.sharlie-gate/bin/</code> so the editors keep a stable path even if you move this folder.</p>
+  </section>
+
+  <section id="preview">
+    <h2>See the changes before they happen</h2>
+    <pre>node dist/sharlie-gate.mjs init --dry-run</pre>
+    <p>This prints which editors were found and the full text it would write. It does not change any file. Add the same flags you plan to use for real, for example <code>--project</code> or <code>--with-proxy</code>.</p>
+  </section>
+
+  <section id="install">
+    <h2>Install</h2>
+    <p>The usual install, for every detected editor:</p>
+    <pre>node dist/sharlie-gate.mjs init</pre>
+    <p>That command does three things:</p>
+    <ol>
+      <li>Copies the program into <code>~/.sharlie-gate/bin/</code> (the <code>.mjs</code> file, <code>tree-sitter.wasm</code>, and <code>grammars/</code>).</li>
+      <li>Writes editor config only for folders that already exist. A missing editor is skipped.</li>
+      <li>Saves the previous contents of every file it touches in <code>~/.sharlie-gate/install-manifest.json</code>. If a file already had text, it also writes a sibling <code>.sharlie-gate.bak</code> once.</li>
+    </ol>
+    <p>Add a project when you want rules inside one repository:</p>
+    <pre>node dist/sharlie-gate.mjs init --project C:\path\to\your\repo</pre>
+    <p>On macOS or Linux, use the repo path in that shell, for example <code>--project ~/src/your-repo</code>.</p>
+    <div class="warn">
+      <strong>Install remembers the whole file, not a patch.</strong>
+      Uninstall later restores each touched file to the bytes from before the first install. Edits you make to those same files after install are included in that restore.
+    </div>
+  </section>
+
+  <section id="editors">
+    <h2>What each editor receives</h2>
+    <p>Every editor entry starts the same local tool server:</p>
+    <pre>node ~/.sharlie-gate/bin/sharlie-gate.mjs mcp</pre>
+    <p>The editor launches that process itself. You do not leave a terminal open for it. The server offers three tools: <code>read_file_outline</code>, <code>expand_section_lines</code>, and <code>targeted_search</code>.</p>
+
+    <h3>Cursor</h3>
+    <p>Written only when <code>~/.cursor</code> already exists.</p>
+    <table>
+      <thead><tr><th>File</th><th>What running init does</th></tr></thead>
+      <tbody>
+        <tr><td><code>~/.cursor/mcp.json</code></td><td>Adds an MCP server named <code>sharlie-gate</code>. Other servers in the file stay.</td></tr>
+        <tr><td><code>~/.cursor/plugins/local/sharlie-gate/</code></td><td>Adds a local plugin: a rule that tells the model to outline first, and a skill with the same instructions.</td></tr>
+        <tr><td><code>~/.cursor/settings.json</code></td><td>Adds <code>sharlie-gate</code> to <code>enabled_plugins</code>.</td></tr>
+      </tbody>
+    </table>
+    <p>After init, restart Cursor or reload the window so it picks up the MCP server. In a chat, the model should call <code>read_file_outline</code> before dumping a whole file.</p>
+    <p>Optional Cursor hooks, which are a separate switch:</p>
+    <pre>node dist/sharlie-gate.mjs init --enforce</pre>
+    <p>That writes <code>~/.cursor/hooks.json</code> with <code>beforeReadFile</code>, <code>preToolUse</code>, and <code>postToolUse</code> commands. Those commands stay idle until the environment variable <code>SHARLIE_GATE_ENFORCE=1</code> is set for Cursor. With that variable set:</p>
+    <ul>
+      <li>A full read of a file of 150 lines or more is denied, and the model is told to call <code>read_file_outline</code>.</li>
+      <li>A shell command is wrapped as <code>sharlie-gate run -- …</code> so a long transcript is stored and shortened.</li>
+      <li>A huge MCP tool result is cut to the first 2,000 characters.</li>
+    </ul>
+
+    <h3>GitHub Copilot CLI</h3>
+    <p>Written only when <code>~/.copilot</code> already exists. This is the Copilot CLI home, not the VS Code extension by itself.</p>
+    <table>
+      <thead><tr><th>File</th><th>What running init does</th></tr></thead>
+      <tbody>
+        <tr><td><code>~/.copilot/mcp-config.json</code></td><td>Adds the <code>sharlie-gate</code> MCP server.</td></tr>
+        <tr><td><code>~/.copilot/instructions/sharlie-gate.instructions.md</code></td><td>Tells Copilot to outline first, then expand a range or symbol.</td></tr>
+        <tr><td><code>~/.copilot/skills/sharlie-gate-reader/SKILL.md</code></td><td>Same instructions, packaged as a skill.</td></tr>
+        <tr><td><code>~/.copilot/hooks/sharlie-gate.json</code></td><td>Registers three hooks. They run on their own. No extra flag.</td></tr>
+      </tbody>
+    </table>
+    <p>The hooks do this:</p>
+    <ul>
+      <li><code>userPromptSubmitted</code> remembers files you mentioned with <code>@</code> so those files are left alone.</li>
+      <li><code>preToolUse</code> can deny an edit when the session still needs a hidden range expanded.</li>
+      <li><code>postToolUse</code> replaces a read of 150 lines or more with an outline, and shortens a shell transcript longer than 200 lines.</li>
+    </ul>
+
+    <h3>Claude Code</h3>
+    <p>Written when <code>~/.claude</code> or <code>~/.claude.json</code> exists.</p>
+    <table>
+      <thead><tr><th>File</th><th>What running init does</th></tr></thead>
+      <tbody>
+        <tr><td><code>~/.claude.json</code></td><td>Adds the <code>sharlie-gate</code> MCP server. The rest of the file stays.</td></tr>
+        <tr><td><code>~/.claude/CLAUDE.md</code></td><td>Inserts a marked block between <code>&lt;!-- sharlie-gate:begin --&gt;</code> and <code>&lt;!-- sharlie-gate:end --&gt;</code>. Text outside that block stays.</td></tr>
+      </tbody>
+    </table>
+    <p>The proxy switch, described below, is the only install path that also edits <code>~/.claude/settings.json</code>.</p>
+
+    <h3>Codex CLI</h3>
+    <p>Written only when <code>~/.codex</code> already exists.</p>
+    <table>
+      <thead><tr><th>File</th><th>What running init does</th></tr></thead>
+      <tbody>
+        <tr><td><code>~/.codex/config.toml</code></td><td>Adds a table <code>[mcp_servers.sharlie-gate]</code> with the node command. Other tables stay.</td></tr>
+        <tr><td><code>~/.codex/AGENTS.md</code></td><td>Inserts the same marked instruction block used for Claude.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>OpenCode</h3>
+    <p>Written only when <code>~/.config/opencode</code> already exists. If <code>XDG_CONFIG_HOME</code> is set, that directory is used instead of <code>~/.config</code>.</p>
+    <table>
+      <thead><tr><th>File</th><th>What running init does</th></tr></thead>
+      <tbody>
+        <tr><td><code>~/.config/opencode/opencode.json</code></td><td>Adds a local MCP server named <code>sharlie-gate</code>.</td></tr>
+        <tr><td><code>~/.config/opencode/AGENTS.md</code></td><td>Inserts the marked instruction block.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>One repository</h3>
+    <p>Pass <code>--project</code> with the repo root. These files are written even when the editor home folders are missing:</p>
+    <table>
+      <thead><tr><th>File</th><th>Who reads it</th></tr></thead>
+      <tbody>
+        <tr><td><code>your-repo/.cursor/rules/sharlie-gate.mdc</code></td><td>Cursor, for this repo only. The rule is always applied.</td></tr>
+        <tr><td><code>your-repo/.github/copilot-instructions.md</code></td><td>GitHub Copilot in VS Code and the Copilot CLI, for this repo. The Sharlie text sits inside the marked block.</td></tr>
+        <tr><td><code>your-repo/AGENTS.md</code></td><td>Codex, OpenCode, and other agents that read <code>AGENTS.md</code>. Marked block only.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>VS Code workspace MCP</h3>
+    <pre>node dist/sharlie-gate.mjs init --legacy-vscode --project C:\path\to\your\repo</pre>
+    <p>That also writes <code>your-repo/.vscode/mcp.json</code> with a server entry named <code>sharlie-gate</code>. VS Code and Copilot Chat can start that server for the workspace. The <code>--project</code> files in the table above are written as well.</p>
+  </section>
+
+  <section id="proxy">
+    <h2>Optional proxy</h2>
+    <p>The default install does not sit in front of model traffic. The outline tools are enough for the editors above. The proxy is a second program that rewrites chat requests on your machine, on <code>127.0.0.1:8080</code> only.</p>
+    <pre>node dist/sharlie-gate.mjs init --with-proxy
+node dist/sharlie-gate.mjs proxy</pre>
+    <p><code>init --with-proxy</code> does two concrete things:</p>
+    <ul>
+      <li>If Claude Code is installed, it sets <code>ANTHROPIC_BASE_URL</code> in <code>~/.claude/settings.json</code> to <code>http://127.0.0.1:8080/anthropic</code>. Claude Code then sends its API calls to the local proxy.</li>
+      <li>It prints an autostart command. It does not run that command, and it does not create a macOS plist or a Linux service file.</li>
+    </ul>
+    <p><code>proxy</code> keeps running until you stop it. While it is running it can fold older file copies out of the conversation, drop duplicate file views, shorten a resolved error log, trim noisy terminal output, and keep the cacheable prefix of the request stable. A ledger of the savings is stored in <code>~/.sharlie-gate/ledger.sqlite</code>. Open <code>http://127.0.0.1:8080/ledger</code> in a browser on the same machine to read it.</p>
+    <p>Stop the proxy by ending that terminal process. Claude Code will fail its API calls while <code>ANTHROPIC_BASE_URL</code> still points at port 8080 and nothing is listening. Run uninstall, or start the proxy again, before you rely on Claude.</p>
+    <p>If you ran the printed Windows autostart line yourself, logon will start the proxy as scheduled task <code>SharlieGate</code>. Remove that task with:</p>
+    <pre>schtasks /Delete /TN SharlieGate /F</pre>
+    <p>Cursor, Copilot, Codex, and OpenCode are not pointed at the proxy by <code>init</code>. Only Claude’s base URL is.</p>
+  </section>
+
+  <section id="works">
+    <h2>How a normal session works</h2>
+    <ol>
+      <li>The editor starts <code>sharlie-gate.mjs mcp</code> when a chat needs tools.</li>
+      <li>The instruction files ask the model to call <code>read_file_outline</code> first. Files under 150 lines come back whole. Longer files come back as signatures and line markers, with the bodies hidden.</li>
+      <li>The model calls <code>expand_section_lines</code> for one hidden range or one symbol, or <code>targeted_search</code> to find a string with a few lines of context.</li>
+      <li>Before an edit, the model is told to ask for the full file with <code>intent: "edit"</code>.</li>
+      <li>For TypeScript, JavaScript, Python, Go, and Rust, symbol names come from Tree-sitter. Other languages use the built-in scanner. Both paths stay on your machine.</li>
+    </ol>
+    <p>Nothing in that path requires the proxy. Hooks, when present, are a backstop for reads and shell output that bypassed the tools.</p>
+  </section>
+
+  <section id="check">
+    <h2>Check that it is installed</h2>
+    <pre>node dist/sharlie-gate.mjs doctor
+node dist/sharlie-gate.mjs status</pre>
+    <p><code>doctor</code> prints which editor folders it can see, whether the proxy bypass flag is on, and whether <code>node</code> is missing. <code>status</code> prints a one-line savings summary from the ledger. An empty ledger is normal until the proxy has handled traffic.</p>
+    <p>Turn the proxy’s rewriting off without uninstalling:</p>
+    <pre>node dist/sharlie-gate.mjs bypass on
+node dist/sharlie-gate.mjs bypass off</pre>
+    <p><code>bypass on</code> writes a flag file at <code>~/.sharlie-gate/bypass</code>. The proxy process must be running for that flag to matter. <code>bypass off</code> removes the flag.</p>
+  </section>
+
+  <section id="remove">
+    <h2>Stop using it</h2>
+    <p>From the Sharlie Gate folder:</p>
+    <pre>node dist/sharlie-gate.mjs uninstall</pre>
+    <p>That command reads <code>~/.sharlie-gate/install-manifest.json</code> and puts every file <code>init</code> touched back to its previous contents. A file that did not exist before install is deleted. The manifest is then emptied. Editor MCP entries, rules, skills, hooks, and the marked blocks in <code>CLAUDE.md</code>, <code>AGENTS.md</code>, and <code>copilot-instructions.md</code> go away with that restore.</p>
+    <div class="warn">
+      <strong>Uninstall does not delete the data folder, the backups, or a scheduled task you created yourself.</strong>
+      Do the extra steps below if you want no Sharlie Gate files left.
+    </div>
+
+    <h3>1. Stop anything still running</h3>
+    <ul>
+      <li>Close the terminal that is running <code>sharlie-gate.mjs proxy</code>, if you started one.</li>
+      <li>Quit the editors so they are not still holding the MCP process.</li>
+      <li>On Windows, if you created the logon task: <code>schtasks /Delete /TN SharlieGate /F</code>.</li>
+    </ul>
+
+    <h3>2. Run uninstall</h3>
+    <pre>node dist/sharlie-gate.mjs uninstall</pre>
+    <p>You should see the single word <code>uninstalled</code>.</p>
+
+    <h3>3. Delete leftovers by hand</h3>
+    <p>These are not removed by <code>uninstall</code>:</p>
+    <table>
+      <thead><tr><th>Leftover</th><th>What it is</th></tr></thead>
+      <tbody>
+        <tr><td><code>~/.sharlie-gate/</code></td><td>The whole data folder: the copied program in <code>bin/</code>, <code>install-manifest.json</code>, <code>ledger.sqlite</code>, <code>sessions/</code>, and the bypass flag. Deleting this folder removes the program the editors were pointed at. Do this after uninstall, so the manifest has already been applied.</td></tr>
+        <tr><td><code>*.sharlie-gate.bak</code></td><td>One backup beside each config file that already had contents. Examples: <code>~/.cursor/mcp.json.sharlie-gate.bak</code>, <code>~/.claude.json.sharlie-gate.bak</code>, <code>~/.codex/config.toml.sharlie-gate.bak</code>. Delete the <code>.bak</code> files after you are sure the restored files look right. Search your home folder and the project you passed to <code>--project</code>.</td></tr>
+        <tr><td>This git checkout</td><td><code>npm install</code> and <code>npm run build</code> only affect the Sharlie Gate folder (<code>node_modules/</code> and <code>dist/</code>). Delete the checkout if you do not want the source. That does not uninstall Node.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>4. Confirm the editors are clear</h3>
+    <p>After uninstall and after deleting <code>~/.sharlie-gate</code>, these should no longer mention <code>sharlie-gate</code>:</p>
+    <ul>
+      <li><code>~/.cursor/mcp.json</code> and <code>~/.cursor/settings.json</code></li>
+      <li><code>~/.cursor/plugins/local/sharlie-gate/</code> (the folder is removed when it was created by init)</li>
+      <li><code>~/.cursor/hooks.json</code> if you used <code>--enforce</code></li>
+      <li><code>~/.copilot/mcp-config.json</code>, <code>~/.copilot/hooks/sharlie-gate.json</code>, <code>~/.copilot/instructions/sharlie-gate.instructions.md</code>, <code>~/.copilot/skills/sharlie-gate-reader/</code></li>
+      <li><code>~/.claude.json</code>, <code>~/.claude/CLAUDE.md</code>, and <code>~/.claude/settings.json</code> if you used <code>--with-proxy</code></li>
+      <li><code>~/.codex/config.toml</code> and <code>~/.codex/AGENTS.md</code></li>
+      <li><code>~/.config/opencode/opencode.json</code> and <code>~/.config/opencode/AGENTS.md</code></li>
+      <li>In the repo: <code>.cursor/rules/sharlie-gate.mdc</code>, the marked block in <code>.github/copilot-instructions.md</code>, the marked block in <code>AGENTS.md</code>, and <code>.vscode/mcp.json</code> if you used <code>--legacy-vscode</code></li>
+    </ul>
+    <p>Restart each editor once so it drops the old MCP process.</p>
+  </section>
+</main>
+</body>
+</html>

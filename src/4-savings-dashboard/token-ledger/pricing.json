@@ -1,0 +1,52 @@
+[
+  {
+    "provider": "anthropic",
+    "pattern": "claude-sonnet-4.6",
+    "input_e6": 3000000,
+    "output_e6": 15000000,
+    "cache_read_e6": 300000,
+    "cache_write_5m_e6": 3750000,
+    "cache_write_1h_e6": 6000000,
+    "min_cacheable": 1024
+  },
+  {
+    "provider": "anthropic",
+    "pattern": "claude-sonnet-4-6",
+    "input_e6": 3000000,
+    "output_e6": 15000000,
+    "cache_read_e6": 300000,
+    "cache_write_5m_e6": 3750000,
+    "cache_write_1h_e6": 6000000,
+    "min_cacheable": 1024
+  },
+  {
+    "provider": "anthropic",
+    "pattern": "claude-opus-4",
+    "input_e6": 15000000,
+    "output_e6": 75000000,
+    "cache_read_e6": 1500000,
+    "cache_write_5m_e6": 18750000,
+    "cache_write_1h_e6": 30000000,
+    "min_cacheable": 1024
+  },
+  {
+    "provider": "anthropic",
+    "pattern": "claude-haiku",
+    "input_e6": 250000,
+    "output_e6": 1250000,
+    "cache_read_e6": 25000,
+    "cache_write_5m_e6": 312500,
+    "cache_write_1h_e6": 500000,
+    "min_cacheable": 2048
+  },
+  {
+    "provider": "openai",
+    "pattern": "gpt-5",
+    "input_e6": 1250000,
+    "output_e6": 10000000,
+    "cache_read_e6": 125000,
+    "cache_write_5m_e6": 1250000,
+    "cache_write_1h_e6": 1250000,
+    "min_cacheable": 1024
+  }
+]

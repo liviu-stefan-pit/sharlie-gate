@@ -1,0 +1,12 @@
+node_modules/
+.cursor/
+dist/
+dist-types/
+*.log
+.DS_Store
+coverage/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+.sharlie-home/

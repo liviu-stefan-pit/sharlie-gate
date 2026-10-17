@@ -1,0 +1,5 @@
+{
+  "toolName": "bash",
+  "toolArgs": { "command": "npm test" },
+  "toolResult": { "resultType": "success", "textResultForLlm": "npm ERR! missing script" }
+}

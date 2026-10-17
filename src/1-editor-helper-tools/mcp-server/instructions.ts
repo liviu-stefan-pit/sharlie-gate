@@ -1,0 +1,2 @@
+export const READER_INSTRUCTIONS =
+  "PREFERRED FIRST STEP for reading any file: call read_file_outline before any full-file read. It returns signatures and markers, not implementation bodies. Then call expand_section_lines only for the lines you are about to inspect or edit. Use targeted_search instead of opening files to find a string. Never re-read a file that was already shown this turn. Pass intent edit before writing so the target comes back in full.";

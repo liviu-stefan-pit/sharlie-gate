@@ -1,0 +1,10 @@
+{
+  "name": "sharlie-gate-status-pill",
+  "displayName": "Sharlie-Gate Status Pill",
+  "version": "0.1.0",
+  "publisher": "sharlie-gate",
+  "engines": { "vscode": "^1.90.0" },
+  "activationEvents": ["onStartupFinished"],
+  "main": "./extension.js",
+  "contributes": {}
+}
