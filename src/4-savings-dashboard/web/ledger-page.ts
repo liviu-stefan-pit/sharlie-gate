@@ -2,10 +2,26 @@ import type http from "node:http";
 import { formatHeadline, formatTicker, signed } from "../token-ledger/money.js";
 import { Ledger, type RequestRow } from "../token-ledger/db.js";
 
-export function summary(ledger: Ledger): { today: bigint; last: bigint; verifiedOnly: true } {
+export interface LedgerHeadline {
+  today: bigint;
+  last: bigint;
+  verifiedOnly: true;
+  calibratedToday: bigint;
+  tokensRemoved: number;
+  fastExpandRate: number;
+}
+
+export function summary(ledger: Ledger): LedgerHeadline {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
-  return { today: ledger.verifiedNetSince(start.getTime()), last: ledger.lastVerifiedNet(), verifiedOnly: true };
+  return {
+    today: ledger.verifiedNetSince(start.getTime()),
+    last: ledger.lastVerifiedNet(),
+    verifiedOnly: true,
+    calibratedToday: ledger.calibratedNetSince(start.getTime()),
+    tokensRemoved: ledger.tokensRemoved(),
+    fastExpandRate: ledger.fastExpandRate(),
+  };
 }
 
 export function footerLine(prunedTokens: number, cacheHit: number, savedPico: bigint): string {
@@ -17,25 +33,48 @@ export function statusPill(today: bigint, last: bigint): string {
   return `$(shield) Saved Today: ${formatHeadline(today)} (Last turn: ${signed(formatHeadline(last))})`;
 }
 
-export function ledgerHtml(rows: RequestRow[], detail?: string): string {
+export function ledgerHtml(rows: RequestRow[], detail?: string, headline?: Partial<LedgerHeadline> & { today: bigint; last: bigint }): string {
   const body = rows.map((row) => {
     const saved = BigInt(row.display_net_pico ?? 0);
     const zoom = Number(row.usage_cache_write_5m ?? 0) > 0 ? " zoom" : "";
-    return `<tr class="${saved < 0n ? "neg" : "pos"}${zoom}"><td>${new Date(Number(row.ts_start)).toISOString()}</td><td>${escape(row.source)}</td><td>${escape(row.model)}</td><td>${escape(row.client)}</td><td>${row.verified ? "verified" : "estimated"}</td><td>${formatTicker(saved)}</td></tr>`;
+    return `<tr class="${saved < 0n ? "neg" : "pos"}${zoom}"><td>${new Date(Number(row.ts_start)).toISOString()}</td><td>${escape(row.source)}</td><td>${escape(row.model)}</td><td>${escape(row.client)}</td><td>${escape(kindLabel(row))}</td><td>${formatTicker(saved)}</td></tr>`;
   }).join("");
+  const stats = headline
+    ? `<p><strong>Saved today</strong> ${escape(formatHeadline(headline.today))}</p><p><strong>Last turn</strong> ${escape(signed(formatHeadline(headline.last)))}</p>${extraStats(headline)}`
+    : "";
   return `<!doctype html><html><head><meta charset="utf-8"><title>Sharlie-Gate ledger</title>
 <style>body{font:14px/1.4 ui-sans-serif,system-ui;margin:24px;background:#111;color:#eee}table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #333;padding:6px;text-align:left}.neg{color:#f88}.pos{color:#8f8}a{color:#9cf}</style></head>
-<body><h1>Sharlie-Gate ledger</h1><p>Verified totals never include estimated rows.</p>
+<body><h1>Sharlie-Gate ledger</h1>${stats}<p>Verified totals are input-only and never include estimated or bytes/4 rows. Output tokens are not part of the saving. API-equivalent dollars are calibrated, not an invoice. Cache credit is the cache portion of a verified row, not a second saving.</p>
 <p><a href="/ledger/export.csv">Export CSV</a></p>
 <table><thead><tr><th>Time</th><th>Source</th><th>Model</th><th>Client</th><th>Kind</th><th>Net</th></tr></thead><tbody>${body}</tbody></table>
 <pre>${escape(detail ?? "")}</pre></body></html>`;
 }
 
+function extraStats(headline: Partial<LedgerHeadline>): string {
+  const parts: string[] = [];
+  if (headline.calibratedToday !== undefined) {
+    parts.push(`<p><strong>API-equivalent today</strong> ${escape(formatHeadline(headline.calibratedToday))} (calibrated, not an invoice)</p>`);
+  }
+  if (headline.tokensRemoved !== undefined) {
+    const rate = Math.round((headline.fastExpandRate ?? 0) * 100);
+    parts.push(`<p><strong>Tokens not returned</strong> ${headline.tokensRemoved.toLocaleString("en-US")} (fast-expand ${rate}%)</p>`);
+  }
+  return parts.join("");
+}
+
+function kindLabel(row: RequestRow): string {
+  if (row.raw_tokens_method === "provider-count" && row.verified) return "verified";
+  if (row.raw_tokens_method === "calibrated") return "API-equivalent";
+  if (row.verified) return "verified";
+  return "estimated";
+}
+
 export function ledgerCsv(rows: RequestRow[]): string {
-  const header = "id,ts_start,source,client,provider,model,verified,raw_tokens,display_net_pico,net_ticker";
+  const header = "id,ts_start,source,client,provider,model,verified,raw_tokens,raw_tokens_method,display_net_pico,cache_credit_pico,counterfactual,provider_request_id,net_ticker";
   const lines = rows.map((row) => {
     const pico = BigInt(row.display_net_pico ?? 0);
-    return [row.id, row.ts_start, row.source, row.client ?? "", row.provider ?? "", row.model ?? "", row.verified, row.raw_tokens ?? "", pico.toString(), formatTicker(pico)].join(",");
+    const credit = BigInt(row.cache_credit_pico ?? 0);
+    return [row.id, row.ts_start, row.source, row.client ?? "", row.provider ?? "", row.model ?? "", row.verified, row.raw_tokens ?? "", row.raw_tokens_method ?? "", pico.toString(), credit.toString(), row.counterfactual ?? "", row.provider_request_id ?? "", formatTicker(pico)].join(",");
   });
   return [header, ...lines].join("\n");
 }
@@ -49,7 +88,16 @@ export function handleLedgerRequest(req: http.IncomingMessage, res: http.ServerR
     if (url.pathname === "/ledger/api/summary") {
       const snap = summary(ledger);
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ todayPico: snap.today.toString(), lastPico: snap.last.toString(), today: formatHeadline(snap.today), last: formatHeadline(snap.last), verifiedOnly: true }));
+      res.end(JSON.stringify({
+        todayPico: snap.today.toString(),
+        lastPico: snap.last.toString(),
+        today: formatHeadline(snap.today),
+        last: formatHeadline(snap.last),
+        calibratedToday: formatHeadline(snap.calibratedToday),
+        tokensRemoved: snap.tokensRemoved,
+        fastExpandRate: snap.fastExpandRate,
+        verifiedOnly: true,
+      }));
       return true;
     }
     if (url.pathname === "/ledger/export.csv") {
@@ -64,8 +112,9 @@ export function handleLedgerRequest(req: http.IncomingMessage, res: http.ServerR
       return true;
     }
     const rows = ledger.list(500);
+    const snap = summary(ledger);
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    res.end(ledgerHtml(rows));
+    res.end(ledgerHtml(rows, undefined, snap));
     return true;
   } catch (error) {
     res.writeHead(500, { "content-type": "text/plain" });

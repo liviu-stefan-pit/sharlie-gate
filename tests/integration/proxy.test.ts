@@ -7,6 +7,7 @@ import { startProxy } from "../../src/2-traffic-gatekeeper/tunnel-connector/serv
 import { createTransformState, transformBody } from "../../src/2-traffic-gatekeeper/tunnel-connector/transform.js";
 import { createSseTap } from "../../src/2-traffic-gatekeeper/tunnel-connector/sse-tap.js";
 import { loadConfig } from "../../src/core/config.js";
+import { geminiExplicitCacheAllowed } from "../../src/2-traffic-gatekeeper/adapters/gemini.js";
 
 const big = Array.from({ length: 180 }, (_, i) => `const line${i} = ${i};`).join("\n");
 
@@ -61,6 +62,57 @@ describe("gatekeeper", () => {
     expect(a).toBe(b);
     expect(b).not.toContain("2026-10-17T10:05:00Z");
     expect(second.prefixDrift).toBe(false);
+  });
+
+  it("leaves the system alone after a system_changed miss", () => {
+    const state = createTransformState();
+    const cfg = loadConfig({});
+    const first = transformBody(Buffer.from(JSON.stringify(anthropic("2026-10-17T10:00:00Z"))), "/v1/messages", state, cfg);
+    expect(first.conversationId).toBeTruthy();
+    state.holds.set(first.conversationId ?? "", { system: true, tools: false, reason: "system_changed" });
+    const second = transformBody(Buffer.from(JSON.stringify(anthropic("2026-10-17T10:05:00Z"))), "/v1/messages", state, cfg);
+    expect(JSON.parse(second.body.toString("utf8")).system).toContain("2026-10-17T10:05:00Z");
+  });
+
+  it("does not set a prompt cache key on GPT-5.6 unless accounting is isolated", () => {
+    const modern = { model: "gpt-5.6", input: [{ role: "user", content: [{ type: "input_text", text: "hi" }] }] };
+    const routed = transformBody(Buffer.from(JSON.stringify(modern)), "/openai/v1/responses", createTransformState(), loadConfig({}));
+    const parsed = JSON.parse(routed.body.toString("utf8"));
+    expect(parsed.prompt_cache_key).toBeUndefined();
+    expect(parsed.prompt_cache_options.ttl).toBe("30m");
+    const isolated = transformBody(Buffer.from(JSON.stringify(modern)), "/openai/v1/responses", createTransformState(), loadConfig({ isolateCacheAccounting: true }));
+    expect(JSON.parse(isolated.body.toString("utf8")).prompt_cache_key).toBeTruthy();
+    const older = transformBody(
+      Buffer.from(JSON.stringify({ model: "gpt-5", messages: [{ role: "user", content: "hi" }] })),
+      "/openai/v1/chat/completions",
+      createTransformState(),
+      loadConfig({}),
+    );
+    expect(JSON.parse(older.body.toString("utf8")).prompt_cache_key).toBeTruthy();
+  });
+
+  it("stabilizes a Gemini prefix and does not attach an explicit cache", () => {
+    const body = {
+      systemInstruction: { parts: [{ text: "You are a coding agent.\nToday's date is 2026-10-17T10:00:00Z" }] },
+      contents: [
+        { role: "user", parts: [{ text: "inspect" }] },
+        { role: "model", parts: [{ text: "ok" }] },
+        { role: "user", parts: [{ text: "what now?" }] },
+      ],
+    };
+    const result = transformBody(
+      Buffer.from(JSON.stringify(body)),
+      "/gemini/v1beta/models/gemini-4-argon:generateContent",
+      createTransformState(),
+      loadConfig({}),
+    );
+    const parsed = JSON.parse(result.body.toString("utf8"));
+    expect(parsed.cachedContent).toBeUndefined();
+    expect(parsed.cached_content).toBeUndefined();
+    expect(JSON.stringify(parsed.systemInstruction)).not.toContain("2026-10-17T10:00:00Z");
+    expect(geminiExplicitCacheAllowed("gemini-4-argon")).toBe(false);
+    expect(geminiExplicitCacheAllowed("gemini-2.5-flash")).toBe(true);
+    expect(result.provider).toBe("gemini");
   });
 
   it("parses SSE usage across chunk boundaries", () => {

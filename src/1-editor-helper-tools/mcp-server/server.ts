@@ -14,6 +14,7 @@ import { targetedSearch } from "../smart-search/search.js";
 import { listFiles } from "../smart-search/js-backend.js";
 import { ContentStore } from "../../core/content-store.js";
 import { ledgerPath } from "../../core/paths.js";
+import { recordExpand, recordFold } from "../../4-savings-dashboard/token-ledger/events.js";
 
 export const SERVER_NAME = "Sharlie-Gate-Reader";
 export const SERVER_VERSION = "0.1.0";
@@ -60,6 +61,17 @@ export function createReader(roots?: RootSet): McpServer {
         };
       }
       const outlined = outlineText(raw, filePath);
+      if (outlined.mode !== "full") {
+        recordFold({
+          filePath,
+          project: rootSet.roots[0],
+          totalLines: outlined.totalLines,
+          shownLines: outlined.shownLines,
+          fullText: raw,
+          outlineText: outlined.text,
+          rev: outlined.rev,
+        });
+      }
       return {
         content: [{ type: "text" as const, text: outlined.text }],
         structuredContent: {
@@ -80,6 +92,7 @@ export function createReader(roots?: RootSet): McpServer {
       if (ref && !filePath) {
         try {
           const result = expandSection({ filePath: "", ref, rev, store: contentStore() });
+          recordExpand({ filePath: "", text: result.text, rev });
           return text(result.note ? `${result.note}\n${result.text}` : result.text);
         } catch (error) {
           return text(String(error instanceof Error ? error.message : error), true);
@@ -104,6 +117,13 @@ export function createReader(roots?: RootSet): McpServer {
         const prefix = [result.note, result.closest?.length ? `Closest symbols: ${result.closest.join(", ")}` : ""]
           .filter(Boolean)
           .join("\n");
+        recordExpand({
+          filePath,
+          text: result.text,
+          startLine: start_line,
+          endLine: end_line,
+          rev,
+        });
         return {
           content: [{ type: "text" as const, text: prefix ? `${prefix}\n${result.text}` : result.text }],
           structuredContent: { rev: result.rev, nested: result.nested, note: result.note ?? null },

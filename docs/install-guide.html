@@ -89,6 +89,7 @@
   <p class="lede">What to run, what each command writes, how the pieces behave, and what to delete if you stop using it.</p>
   <nav>
     <a href="#need">What you need</a>
+    <a href="#windows">Windows setup</a>
     <a href="#build">Build</a>
     <a href="#preview">Preview</a>
     <a href="#install">Install</a>
@@ -113,6 +114,25 @@
     </ul>
     <p>VS Code and Copilot inside VS Code are optional and only change a project when you pass <code>--legacy-vscode</code> together with <code>--project</code>.</p>
     <p>Paths below use your home folder. On Windows that is <code>%USERPROFILE%</code>. On macOS and Linux it is <code>~</code>. The same commands work on both.</p>
+  </section>
+
+  <section id="windows">
+    <h2>Windows setup program</h2>
+    <p>On Windows you can install from <code>SharlieGate-Setup.exe</code> instead of installing Node yourself. The exe is built from this repo with:</p>
+    <pre>installer\build-win.ps1</pre>
+    <p>The machine that runs that script needs <a href="https://jrsoftware.org/isinfo.php">Inno Setup 6.3</a> or newer. It downloads a pinned Node.js 24 Windows build, stages <code>dist/sharlie-gate.mjs</code> plus the grammar files, and writes <code>dist/installer/SharlieGate-Setup.exe</code>. People who only run the setup exe do not need Node or Inno Setup.</p>
+    <p>The setup is per user. It does not ask for an administrator password. It copies the program to <code>%LOCALAPPDATA%\Programs\Sharlie-Gate</code>, runs <code>init</code> for every editor folder that already exists, and adds <code>sharlie-gate</code> to your user PATH. New terminals pick up that command. It does not turn on the proxy.</p>
+    <p>The Start Menu has two entries:</p>
+    <ul>
+      <li><strong>Sharlie Gate Dashboard</strong> opens the savings page in your browser. If the proxy is already running, that page is <code>http://127.0.0.1:8080/ledger</code>. Otherwise a small local server starts on <code>127.0.0.1:8731</code> and the browser opens <code>http://127.0.0.1:8731/ledger</code>. A second click reuses the page that is already open.</li>
+      <li><strong>Uninstall Sharlie Gate</strong> is the same removal as Apps &amp; Features. It runs <code>uninstall --purge</code>.</li>
+    </ul>
+    <div class="warn">
+      <strong>The setup exe is unsigned.</strong>
+      Windows SmartScreen warns the first time someone else opens it. That warning is expected until the file is signed.
+    </div>
+    <p>Per-repo rules are still a separate command after install, from a new terminal:</p>
+    <pre>sharlie-gate init --project C:\path\to\your\repo</pre>
   </section>
 
   <section id="build">
@@ -252,6 +272,7 @@ node dist/sharlie-gate.mjs proxy</pre>
       <li>It prints an autostart command. It does not run that command, and it does not create a macOS plist or a Linux service file.</li>
     </ul>
     <p><code>proxy</code> keeps running until you stop it. While it is running it can fold older file copies out of the conversation, drop duplicate file views, shorten a resolved error log, trim noisy terminal output, and keep the cacheable prefix of the request stable. A ledger of the savings is stored in <code>~/.sharlie-gate/ledger.sqlite</code>. Open <code>http://127.0.0.1:8080/ledger</code> in a browser on the same machine to read it.</p>
+    <p><code>dashboard</code> opens that same page without starting the proxy. When nothing is listening on port 8080, it serves the ledger on <code>http://127.0.0.1:8731/ledger</code> instead. The page shows <strong>Saved today</strong> and <strong>Last turn</strong> above the request table. Verified totals still leave estimated rows out.</p>
     <p>Stop the proxy by ending that terminal process. Claude Code will fail its API calls while <code>ANTHROPIC_BASE_URL</code> still points at port 8080 and nothing is listening. Run uninstall, or start the proxy again, before you rely on Claude.</p>
     <p>If you ran the printed Windows autostart line yourself, logon will start the proxy as scheduled task <code>SharlieGate</code>. Remove that task with:</p>
     <pre>schtasks /Delete /TN SharlieGate /F</pre>
@@ -273,7 +294,8 @@ node dist/sharlie-gate.mjs proxy</pre>
   <section id="check">
     <h2>Check that it is installed</h2>
     <pre>node dist/sharlie-gate.mjs doctor
-node dist/sharlie-gate.mjs status</pre>
+node dist/sharlie-gate.mjs status
+node dist/sharlie-gate.mjs dashboard</pre>
     <p><code>doctor</code> prints which editor folders it can see, whether the proxy bypass flag is on, and whether <code>node</code> is missing. <code>status</code> prints a one-line savings summary from the ledger. An empty ledger is normal until the proxy has handled traffic.</p>
     <p>Turn the proxy’s rewriting off without uninstalling:</p>
     <pre>node dist/sharlie-gate.mjs bypass on
@@ -283,38 +305,28 @@ node dist/sharlie-gate.mjs bypass off</pre>
 
   <section id="remove">
     <h2>Stop using it</h2>
-    <p>From the Sharlie Gate folder:</p>
-    <pre>node dist/sharlie-gate.mjs uninstall</pre>
-    <p>That command reads <code>~/.sharlie-gate/install-manifest.json</code> and puts every file <code>init</code> touched back to its previous contents. A file that did not exist before install is deleted. The manifest is then emptied. Editor MCP entries, rules, skills, hooks, and the marked blocks in <code>CLAUDE.md</code>, <code>AGENTS.md</code>, and <code>copilot-instructions.md</code> go away with that restore.</p>
-    <div class="warn">
-      <strong>Uninstall does not delete the data folder, the backups, or a scheduled task you created yourself.</strong>
-      Do the extra steps below if you want no Sharlie Gate files left.
-    </div>
-
-    <h3>1. Stop anything still running</h3>
+    <p>Two commands. Use the first when you want the editors restored and the savings ledger kept. Use the second when you want the install gone.</p>
+    <pre>node dist/sharlie-gate.mjs uninstall
+node dist/sharlie-gate.mjs uninstall --purge</pre>
+    <p><code>uninstall</code> reads <code>~/.sharlie-gate/install-manifest.json</code> and puts every file <code>init</code> touched back to its previous contents. A file that did not exist before install is deleted. The manifest is then emptied. You should see the single word <code>uninstalled</code>. Editor MCP entries, rules, skills, hooks, and the marked blocks in <code>CLAUDE.md</code>, <code>AGENTS.md</code>, and <code>copilot-instructions.md</code> go away with that restore. The data folder, the <code>.sharlie-gate.bak</code> files, and a Windows logon task stay.</p>
+    <p><code>uninstall --purge</code> does that restore and then removes the leftovers:</p>
     <ul>
-      <li>Close the terminal that is running <code>sharlie-gate.mjs proxy</code>, if you started one.</li>
-      <li>Quit the editors so they are not still holding the MCP process.</li>
-      <li>On Windows, if you created the logon task: <code>schtasks /Delete /TN SharlieGate /F</code>.</li>
+      <li>Stops the dashboard process and any proxy started from this install.</li>
+      <li>Deletes the Windows scheduled task <code>SharlieGate</code> if you created it.</li>
+      <li>Deletes the <code>.sharlie-gate.bak</code> file beside each config <code>init</code> changed.</li>
+      <li>Removes empty <code>sharlie-gate</code> and <code>sharlie-gate-reader</code> folders, including <code>~/.cursor/plugins/local/sharlie-gate/</code> when nothing else is in them.</li>
+      <li>Deletes <code>~/.sharlie-gate/</code>, including <code>ledger.sqlite</code>. Savings history goes away with this command.</li>
     </ul>
+    <p>You should see the single word <code>purged</code>.</p>
+    <p>The Windows setup program’s uninstall entry runs <code>uninstall --purge</code>, then deletes <code>%LOCALAPPDATA%\Programs\Sharlie-Gate</code> and takes that folder off your user PATH. Apps &amp; Features and the Start Menu shortcut both do this.</p>
+    <div class="warn">
+      <strong>Plain <code>uninstall</code> keeps the data folder.</strong>
+      Run <code>uninstall --purge</code>, or use the Windows uninstall entry, when you want those files gone. A folder you added a file into, such as a note inside <code>plugins/local/sharlie-gate/</code>, is left in place.
+    </div>
+    <p>If you installed from a git checkout, that checkout is separate. Delete the repo folder yourself if you do not want the source. That does not uninstall Node.</p>
 
-    <h3>2. Run uninstall</h3>
-    <pre>node dist/sharlie-gate.mjs uninstall</pre>
-    <p>You should see the single word <code>uninstalled</code>.</p>
-
-    <h3>3. Delete leftovers by hand</h3>
-    <p>These are not removed by <code>uninstall</code>:</p>
-    <table>
-      <thead><tr><th>Leftover</th><th>What it is</th></tr></thead>
-      <tbody>
-        <tr><td><code>~/.sharlie-gate/</code></td><td>The whole data folder: the copied program in <code>bin/</code>, <code>install-manifest.json</code>, <code>ledger.sqlite</code>, <code>sessions/</code>, and the bypass flag. Deleting this folder removes the program the editors were pointed at. Do this after uninstall, so the manifest has already been applied.</td></tr>
-        <tr><td><code>*.sharlie-gate.bak</code></td><td>One backup beside each config file that already had contents. Examples: <code>~/.cursor/mcp.json.sharlie-gate.bak</code>, <code>~/.claude.json.sharlie-gate.bak</code>, <code>~/.codex/config.toml.sharlie-gate.bak</code>. Delete the <code>.bak</code> files after you are sure the restored files look right. Search your home folder and the project you passed to <code>--project</code>.</td></tr>
-        <tr><td>This git checkout</td><td><code>npm install</code> and <code>npm run build</code> only affect the Sharlie Gate folder (<code>node_modules/</code> and <code>dist/</code>). Delete the checkout if you do not want the source. That does not uninstall Node.</td></tr>
-      </tbody>
-    </table>
-
-    <h3>4. Confirm the editors are clear</h3>
-    <p>After uninstall and after deleting <code>~/.sharlie-gate</code>, these should no longer mention <code>sharlie-gate</code>:</p>
+    <h3>Confirm the editors are clear</h3>
+    <p>After <code>uninstall</code> or <code>uninstall --purge</code>, these should no longer mention <code>sharlie-gate</code>:</p>
     <ul>
       <li><code>~/.cursor/mcp.json</code> and <code>~/.cursor/settings.json</code></li>
       <li><code>~/.cursor/plugins/local/sharlie-gate/</code> (the folder is removed when it was created by init)</li>

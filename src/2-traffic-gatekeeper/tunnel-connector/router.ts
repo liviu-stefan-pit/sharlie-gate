@@ -1,11 +1,12 @@
 export interface RouteTarget {
   url: string;
-  provider: "anthropic" | "openai" | "custom";
+  provider: "anthropic" | "openai" | "gemini" | "custom";
 }
 
 export function routePath(pathname: string, bases: {
   anthropic: string;
   openai: string;
+  gemini: string;
   custom: Record<string, string>;
   defaultProvider: "anthropic" | "openai";
 }): RouteTarget | undefined {
@@ -14,6 +15,9 @@ export function routePath(pathname: string, bases: {
   }
   if (pathname.startsWith("/openai/")) {
     return { url: join(bases.openai, pathname.slice("/openai".length)), provider: "openai" };
+  }
+  if (pathname.startsWith("/gemini/")) {
+    return { url: join(bases.gemini, pathname.slice("/gemini".length)), provider: "gemini" };
   }
   const custom = /^\/p\/([^/]+)(\/.*)?$/.exec(pathname);
   if (custom?.[1]) {

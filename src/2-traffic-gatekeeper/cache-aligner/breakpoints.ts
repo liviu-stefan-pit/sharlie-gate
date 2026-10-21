@@ -8,9 +8,20 @@ export function chooseTtl(medianGapMs: number | undefined): "5m" | "1h" {
   return "5m";
 }
 
+/** GPT-5.6 and later route prompt cache themselves. A key only splits accounting. */
+export function openAIRoutesCacheItself(model: string): boolean {
+  return /gpt-5\.(?:[6-9]|[1-9]\d)|gpt-[6-9]/.test(model);
+}
+
 /** Up to four Anthropic cache breakpoints. Top-level automatic caching is left untouched. */
-export function applyAnthropicBreakpoints(raw: Record<string, unknown>, ttl: "5m" | "1h"): number {
+export function applyAnthropicBreakpoints(
+  raw: Record<string, unknown>,
+  ttl: "5m" | "1h",
+  options: { markSystem?: boolean; markTools?: boolean } = {},
+): number {
   if (raw.cache_control && typeof raw.cache_control === "object") return 0;
+  const markSystem = options.markSystem !== false;
+  const markTools = options.markTools !== false;
   const marker = { type: "ephemeral", ttl };
   let used = 0;
   const mark = (node: Record<string, unknown>) => {
@@ -18,11 +29,11 @@ export function applyAnthropicBreakpoints(raw: Record<string, unknown>, ttl: "5m
     node.cache_control = marker;
     used += 1;
   };
-  if (Array.isArray(raw.system) && raw.system.length) {
+  if (markSystem && Array.isArray(raw.system) && raw.system.length) {
     const last = raw.system[raw.system.length - 1];
     if (last && typeof last === "object") mark(last as Record<string, unknown>);
   }
-  if (Array.isArray(raw.tools) && raw.tools.length) {
+  if (markTools && Array.isArray(raw.tools) && raw.tools.length) {
     const last = raw.tools[raw.tools.length - 1];
     if (last && typeof last === "object") mark(last as Record<string, unknown>);
   }
@@ -38,10 +49,13 @@ export function applyAnthropicBreakpoints(raw: Record<string, unknown>, ttl: "5m
   return used;
 }
 
-export function applyOpenAICacheKey(raw: Record<string, unknown>, conversationId: string, responses: boolean): void {
-  if (typeof raw.prompt_cache_key === "string" && raw.prompt_cache_key.length) return;
-  raw.prompt_cache_key = conversationId;
-  if (responses && typeof raw.model === "string" && /gpt-5\.6|gpt-5\.7|gpt-6/.test(raw.model)) {
-    raw.prompt_cache_options = { ...(typeof raw.prompt_cache_options === "object" && raw.prompt_cache_options ? raw.prompt_cache_options as object : {}), ttl: "30m" };
+export function applyOpenAICacheKey(raw: Record<string, unknown>, conversationId: string, responses: boolean, isolateAccounting = false): void {
+  const model = typeof raw.model === "string" ? raw.model : "";
+  const modern = openAIRoutesCacheItself(model);
+  const keepKey = typeof raw.prompt_cache_key === "string" && raw.prompt_cache_key.length > 0;
+  if (!keepKey && (!modern || isolateAccounting)) raw.prompt_cache_key = conversationId;
+  if (responses && modern) {
+    const prev = typeof raw.prompt_cache_options === "object" && raw.prompt_cache_options ? raw.prompt_cache_options as Record<string, unknown> : {};
+    raw.prompt_cache_options = { ...prev, ttl: typeof prev.ttl === "string" ? prev.ttl : "30m" };
   }
 }

@@ -30,6 +30,10 @@ export function bypassFlagPath(): string {
   return path.join(dataDir(), "bypass");
 }
 
+export function dashboardPidPath(): string {
+  return path.join(dataDir(), "dashboard.pid");
+}
+
 export function sessionDir(): string {
   return path.join(dataDir(), "sessions");
 }

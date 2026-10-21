@@ -27,7 +27,7 @@ export interface CanonBlock {
 }
 
 export interface CanonRequest {
-  provider: "anthropic" | "openai-chat" | "openai-responses" | "other";
+  provider: "anthropic" | "openai-chat" | "openai-responses" | "gemini" | "other";
   model: string;
   raw: Record<string, unknown>;
   blocks: CanonBlock[];

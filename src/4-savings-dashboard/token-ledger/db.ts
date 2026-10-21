@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
+import { log } from "../../core/logger.js";
 import { openDatabase, type SqliteDatabase } from "../../core/sqlite.js";
+import type { FrozenDecision } from "../../2-traffic-gatekeeper/conversation-state/frozen-decisions.js";
+import type { TransformState } from "../../2-traffic-gatekeeper/tunnel-connector/transform.js";
+import type { ModelPrice } from "./pricing.js";
 
 export const MIGRATION = `
 CREATE TABLE IF NOT EXISTS price_snapshots(
@@ -56,12 +60,21 @@ CREATE TABLE IF NOT EXISTS outline_cache(
 CREATE INDEX IF NOT EXISTS idx_requests_ts ON requests(ts_start);
 CREATE INDEX IF NOT EXISTS idx_requests_conv ON requests(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_fold_ext ON fold_events(ext);
+CREATE TABLE IF NOT EXISTS count_calibration(
+  provider TEXT PRIMARY KEY, samples INTEGER NOT NULL, ratio_e6 INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS conversation_cache(
+  conversation_id TEXT PRIMARY KEY, previous_response_id TEXT, miss_reason TEXT,
+  hold_system INTEGER NOT NULL DEFAULT 0, hold_tools INTEGER NOT NULL DEFAULT 0,
+  prefix_hash TEXT, updated_at INTEGER
+);
 `;
 
 export interface RequestRow {
   id: number | bigint;
   ts_start: number | bigint;
   source: string;
+  conversation_id?: string | null;
   client: string | null;
   provider: string | null;
   model: string | null;
@@ -75,6 +88,10 @@ export interface RequestRow {
   usage_cache_write_5m: number | bigint | null;
   usage_output: number | bigint | null;
   bypass_reason: string | null;
+  raw_tokens_method?: string | null;
+  cache_credit_pico?: number | bigint | null;
+  counterfactual?: string | null;
+  provider_request_id?: string | null;
 }
 
 export class Ledger {
@@ -84,6 +101,9 @@ export class Ledger {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const db = openDatabase(file);
     db.exec(MIGRATION);
+    ensureColumn(db, "requests", "usage_reasoning", "INTEGER");
+    ensureColumn(db, "requests", "cache_credit_pico", "INTEGER");
+    ensureColumn(db, "requests", "counterfactual", "TEXT");
     return new Ledger(db);
   }
 
@@ -118,7 +138,208 @@ export class Ledger {
     return row ? BigInt(row.total) : 0n;
   }
 
+  calibratedNetSince(start: number): bigint {
+    const row = this.db.prepare(
+      "SELECT COALESCE(SUM(display_net_pico), 0) AS total FROM requests WHERE raw_tokens_method = 'calibrated' AND ts_start >= ?",
+    ).get(start) as { total: bigint | number };
+    return BigInt(row.total);
+  }
+
+  ensurePrice(price: ModelPrice): number {
+    const found = this.db.prepare(
+      `SELECT id FROM price_snapshots
+       WHERE provider = ? AND model_pattern = ? AND input_e6 = ? AND output_e6 = ?
+         AND cache_read_e6 = ? AND cache_write_5m_e6 = ? AND cache_write_1h_e6 = ? AND min_cacheable = ?`,
+    ).get(
+      price.provider, price.pattern, price.inputE6, price.outputE6,
+      price.cacheReadE6, price.cacheWrite5mE6, price.cacheWrite1hE6, price.minCacheable,
+    ) as { id: number | bigint } | undefined;
+    if (found) return Number(found.id);
+    const result = this.db.prepare(
+      `INSERT INTO price_snapshots(
+        provider, model_pattern, input_e6, output_e6, cache_read_e6, cache_write_5m_e6, cache_write_1h_e6, min_cacheable, effective_from
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      price.provider, price.pattern, price.inputE6, price.outputE6,
+      price.cacheReadE6, price.cacheWrite5mE6, price.cacheWrite1hE6, price.minCacheable,
+      new Date().toISOString(),
+    );
+    return Number(result.lastInsertRowid);
+  }
+
+  calibration(provider: string): { samples: number; ratioE6: number } | undefined {
+    const row = this.db.prepare(
+      "SELECT samples, ratio_e6 FROM count_calibration WHERE provider = ?",
+    ).get(provider) as { samples: number | bigint; ratio_e6: number | bigint } | undefined;
+    if (!row || Number(row.samples) <= 0) return undefined;
+    return { samples: Number(row.samples), ratioE6: Number(row.ratio_e6) };
+  }
+
+  noteCalibration(provider: string, providerTokens: number, byteTokens: number): void {
+    if (!provider || byteTokens <= 0 || providerTokens < 0) return;
+    const sample = Math.round((providerTokens * 1_000_000) / byteTokens);
+    const prev = this.calibration(provider);
+    const now = Date.now();
+    if (!prev) {
+      this.db.prepare(
+        "INSERT INTO count_calibration(provider, samples, ratio_e6, updated_at) VALUES (?, 1, ?, ?)",
+      ).run(provider, sample, now);
+      return;
+    }
+    const samples = prev.samples + 1;
+    const ratio = Math.round((prev.ratioE6 * prev.samples + sample) / samples);
+    this.db.prepare(
+      "UPDATE count_calibration SET samples = ?, ratio_e6 = ?, updated_at = ? WHERE provider = ?",
+    ).run(samples, ratio, now, provider);
+  }
+
+  insertFold(row: {
+    ts: number; source: string; client?: string | null; project?: string | null; path: string; ext: string;
+    totalLines: number; shownLines: number; fullTokens: number; outlineTokens: number; rev: string;
+  }): number {
+    const result = this.db.prepare(
+      `INSERT INTO fold_events(
+        ts, source, client, project, path, ext, total_lines, shown_lines, full_tokens, outline_tokens, rev
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(row.ts, row.source, row.client ?? null, row.project ?? null, row.path, row.ext, row.totalLines, row.shownLines, row.fullTokens, row.outlineTokens, row.rev);
+    return Number(result.lastInsertRowid);
+  }
+
+  latestFold(filePath: string): { id: number; ts: number; rev: string } | undefined {
+    const row = this.db.prepare(
+      "SELECT id, ts, rev FROM fold_events WHERE path = ? ORDER BY ts DESC LIMIT 1",
+    ).get(filePath) as { id: number | bigint; ts: number | bigint; rev: string } | undefined;
+    if (!row) return undefined;
+    return { id: Number(row.id), ts: Number(row.ts), rev: row.rev };
+  }
+
+  insertExpand(row: {
+    ts: number; foldId?: number; path: string; startLine?: number; endLine?: number;
+    tokens: number; secondsAfter?: number; fast: boolean;
+  }): void {
+    this.db.prepare(
+      `INSERT INTO expand_events(
+        ts, fold_event_id, path, start_line, end_line, tokens, seconds_after_fold, fast_expand
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      row.ts, row.foldId ?? null, row.path, row.startLine ?? null, row.endLine ?? null,
+      row.tokens, row.secondsAfter ?? null, row.fast ? 1 : 0,
+    );
+  }
+
+  tokensRemoved(): number {
+    const row = this.db.prepare(
+      `SELECT
+         COALESCE((SELECT SUM(full_tokens - outline_tokens) FROM fold_events), 0)
+         - COALESCE((SELECT SUM(tokens) FROM expand_events), 0) AS net`,
+    ).get() as { net: number | bigint };
+    return Number(row.net);
+  }
+
+  fastExpandRate(): number {
+    const row = this.db.prepare(
+      `SELECT COUNT(*) AS folds,
+         COALESCE(SUM(CASE WHEN id IN (SELECT fold_event_id FROM expand_events WHERE fast_expand = 1) THEN 1 ELSE 0 END), 0) AS fast
+       FROM fold_events`,
+    ).get() as { folds: number | bigint; fast: number | bigint };
+    const folds = Number(row.folds);
+    if (!folds) return 0;
+    return Number(row.fast) / folds;
+  }
+
+  foldRates(): { ext: string; folds: number; rate: number }[] {
+    const rows = this.db.prepare(
+      `SELECT ext, COUNT(*) AS folds,
+         COALESCE(SUM(CASE WHEN id IN (SELECT fold_event_id FROM expand_events WHERE fast_expand = 1) THEN 1 ELSE 0 END), 0) AS fast
+       FROM fold_events GROUP BY ext`,
+    ).all() as { ext: string; folds: number | bigint; fast: number | bigint }[];
+    return rows.map((row) => {
+      const folds = Number(row.folds);
+      const fast = Number(row.fast);
+      return { ext: row.ext, folds, rate: folds ? fast / folds : 0 };
+    });
+  }
+
+  attach(state: TransformState): void {
+    const decisions = this.db.prepare(
+      "SELECT conversation_id, msg_hash, block_idx, filter_id, replacement, epoch FROM frozen_decisions",
+    ).all() as { conversation_id: string; msg_hash: string; block_idx: number | bigint; filter_id: string; replacement: string; epoch: number | bigint }[];
+    for (const row of decisions) {
+      state.decisions.seed(state.decisions.key(row.conversation_id, row.msg_hash, Number(row.block_idx)), {
+        filterId: row.filter_id,
+        replacement: row.replacement,
+        epoch: Number(row.epoch),
+      });
+    }
+    state.decisions.onSet = (key, decision) => {
+      try {
+        this.persistDecision(key, decision);
+      } catch (error) {
+        log("warn", "decision persist failed", { error: String(error) });
+      }
+    };
+    const caches = this.db.prepare(
+      "SELECT conversation_id, previous_response_id, miss_reason, hold_system, hold_tools FROM conversation_cache",
+    ).all() as { conversation_id: string; previous_response_id: string | null; miss_reason: string | null; hold_system: number | bigint; hold_tools: number | bigint }[];
+    for (const row of caches) {
+      if (row.previous_response_id) state.previousResponseId.set(row.conversation_id, row.previous_response_id);
+      if (Number(row.hold_system) || Number(row.hold_tools)) {
+        state.holds.set(row.conversation_id, {
+          system: Number(row.hold_system) === 1,
+          tools: Number(row.hold_tools) === 1,
+          reason: row.miss_reason ?? undefined,
+        });
+      }
+    }
+  }
+
+  persistDecision(key: string, decision: FrozenDecision): void {
+    const [conversationId, msgHash, blockIdx] = key.split("|");
+    if (!conversationId || !msgHash || blockIdx === undefined) return;
+    this.db.prepare(
+      `INSERT INTO frozen_decisions(conversation_id, msg_hash, block_idx, filter_id, replacement, epoch)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(conversation_id, msg_hash, block_idx) DO UPDATE SET
+         filter_id = excluded.filter_id, replacement = excluded.replacement, epoch = excluded.epoch`,
+    ).run(conversationId, msgHash, Number(blockIdx), decision.filterId, decision.replacement, decision.epoch);
+  }
+
+  saveConversationCache(row: {
+    conversationId: string;
+    previousResponseId?: string;
+    missReason?: string | null;
+    holdSystem: boolean;
+    holdTools: boolean;
+    prefixHash?: string;
+  }): void {
+    this.db.prepare(
+      `INSERT INTO conversation_cache(
+        conversation_id, previous_response_id, miss_reason, hold_system, hold_tools, prefix_hash, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(conversation_id) DO UPDATE SET
+        previous_response_id = COALESCE(excluded.previous_response_id, conversation_cache.previous_response_id),
+        miss_reason = excluded.miss_reason,
+        hold_system = excluded.hold_system,
+        hold_tools = excluded.hold_tools,
+        prefix_hash = COALESCE(excluded.prefix_hash, conversation_cache.prefix_hash),
+        updated_at = excluded.updated_at`,
+    ).run(
+      row.conversationId,
+      row.previousResponseId ?? null,
+      row.missReason ?? null,
+      row.holdSystem ? 1 : 0,
+      row.holdTools ? 1 : 0,
+      row.prefixHash ?? null,
+      Date.now(),
+    );
+  }
+
   close(): void {
     this.db.close();
   }
+}
+
+function ensureColumn(db: SqliteDatabase, table: string, column: string, ddl: string): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((col) => col.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
 }

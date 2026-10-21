@@ -8,6 +8,7 @@ import { outlineText } from "../../1-editor-helper-tools/outline-builder/engine.
 import { relocateDynamics } from "../cache-aligner/relocate.js";
 import { applyAnthropicBreakpoints, applyOpenAICacheKey, chooseTtl } from "../cache-aligner/breakpoints.js";
 import { prefixHash } from "../cache-aligner/prefix-verify.js";
+import type { CacheHold } from "../cache-aligner/diagnostics.js";
 import { estimateTokens } from "../../core/tokens.js";
 
 export interface ReceiptNote {
@@ -27,6 +28,8 @@ export interface PipelineInput {
   learned?: Set<string>;
   medianGapMs?: number;
   enabled?: Partial<Record<string, boolean>>;
+  holds?: CacheHold;
+  isolateCacheAccounting?: boolean;
 }
 
 export interface PipelineResult {
@@ -170,15 +173,29 @@ function trimNoisy(ctx: Ctx): void {
 }
 
 function stabilize(ctx: Ctx): void {
-  const moved = relocateDynamics(ctx.canon.blocks, ctx.learned);
-  if (moved.length) ctx.canon.changed = true;
+  if (ctx.holds?.system) {
+    ctx.notes.push({ filterId: "cache-prefix-stabilizer", label: "System left unchanged after cache miss", tokens: 0 });
+  } else {
+    const moved = relocateDynamics(ctx.canon.blocks, ctx.learned);
+    if (moved.length) ctx.canon.changed = true;
+  }
+  if (ctx.holds?.tools) {
+    ctx.notes.push({ filterId: "cache-prefix-stabilizer", label: "Tools left unchanged after cache miss", tokens: 0 });
+  }
   if (ctx.canon.provider === "anthropic") {
-    applyAnthropicBreakpoints(ctx.canon.raw, chooseTtl(ctx.medianGapMs));
+    applyAnthropicBreakpoints(ctx.canon.raw, chooseTtl(ctx.medianGapMs), {
+      markSystem: !ctx.holds?.system,
+      markTools: !ctx.holds?.tools,
+    });
     ctx.canon.changed = true;
   }
   if (ctx.canon.provider === "openai-chat" || ctx.canon.provider === "openai-responses") {
-    applyOpenAICacheKey(ctx.canon.raw, ctx.conversationId, ctx.canon.provider === "openai-responses");
+    applyOpenAICacheKey(ctx.canon.raw, ctx.conversationId, ctx.canon.provider === "openai-responses", ctx.isolateCacheAccounting === true);
     ctx.canon.changed = true;
+  }
+  if (ctx.canon.provider === "gemini") {
+    // Implicit cache only. cachedContent is never attached, including on Argon and Gemini 4+.
+    return;
   }
 }
 

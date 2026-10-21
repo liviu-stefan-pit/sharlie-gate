@@ -1,5 +1,11 @@
 # Sharlie Gate
 
+**Discontinued.** The source stays in this repository in case an editor later exposes the model request.
+
+Sharlie Gate cannot lower a Cursor or GitHub Copilot bill. Those apps send the chat to their own service. The outline skill, the hooks, and the MCP tools are added inside that chat, so they increase the tokens those apps send. The proxy can prune a request only when a client is pointed at it with your own API key. Cursor and Copilot do not take that path.
+
+The rest of this file describes how the program worked. Do not install it to save money on Cursor or Copilot.
+
 Sharlie Gate is a local program that keeps coding agents from pasting whole files into the model. It outlines a file, expands only the lines you need, and can sit in front of API traffic to fold old file copies out of the conversation.
 
 It runs on your machine. It does not create an account.
@@ -22,6 +28,8 @@ node dist/sharlie-gate.mjs --version
 node dist/sharlie-gate.mjs init --dry-run
 node dist/sharlie-gate.mjs init
 ```
+
+On Windows, `installer/build-win.ps1` builds `dist/installer/SharlieGate-Setup.exe`. The machine that builds it needs [Inno Setup 6.3](https://jrsoftware.org/isinfo.php) or newer. People who run the setup exe do not need Node.js. The installer copies a private Node 24 into `%LOCALAPPDATA%\Programs\Sharlie-Gate`, runs `init`, and adds a Start Menu shortcut named **Sharlie Gate Dashboard**. That shortcut opens the savings page in the browser. Uninstall from the Start Menu or from Apps & Features runs `uninstall --purge`, which restores editor files and deletes `%USERPROFILE%\.sharlie-gate`, including the ledger. The setup exe is unsigned, so Windows SmartScreen warns the first time someone else opens it.
 
 `npm install` downloads this repo's libraries. `npm run build` writes `dist/sharlie-gate.mjs` plus the grammar files next to it. `init --dry-run` prints the editor files it would change and writes nothing. `init` copies the program to `~/.sharlie-gate/bin/` and configures every editor whose home folder already exists.
 
@@ -49,7 +57,7 @@ Start the optional proxy yourself, and leave that terminal open:
 node dist/sharlie-gate.mjs proxy
 ```
 
-The proxy listens on `127.0.0.1:8080` only. The savings page is `http://127.0.0.1:8080/ledger`.
+The proxy listens on `127.0.0.1:8080` only. The savings page is `http://127.0.0.1:8080/ledger`. `sharlie-gate dashboard` opens that page, or starts the same page on `http://127.0.0.1:8731/ledger` when the proxy is not running.
 
 ## How a chat uses it
 
@@ -60,15 +68,16 @@ TypeScript, JavaScript, Python, Go, and Rust symbol names come from [Tree-sitter
 ## Commands
 
 ```text
-sharlie-gate <init|uninstall|doctor|mcp|proxy|status|ledger|hook|run|tune|bypass>
+sharlie-gate <init|uninstall|doctor|mcp|proxy|dashboard|status|ledger|hook|run|tune|bypass>
 ```
 
 | Command | What it does |
 | --- | --- |
 | `doctor` | Shows which editors were found and whether Node is missing |
+| `dashboard` | Opens the savings page in the browser. Uses port 8731 when the proxy is not running |
 | `status` | Prints a one-line savings summary from the local ledger |
 | `bypass on` / `bypass off` | Lets proxy traffic through unchanged, or turns rewriting back on |
-| `uninstall` | Restores every file `init` changed. See the guide for leftovers it does not delete |
+| `uninstall` | Restores every file `init` changed. `uninstall --purge` also deletes the data folder, backups, and the Windows logon task |
 
 ## Develop
 

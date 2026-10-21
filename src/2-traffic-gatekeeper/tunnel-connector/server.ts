@@ -4,7 +4,9 @@ import { log, redact } from "../../core/logger.js";
 import { hostAllowed, routePath } from "./router.js";
 import { forwardHeaders, forwardUpstream } from "./upstream.js";
 import { isBypassed, setBypass } from "./control.js";
-import { createSseTap, parseUsageEvent } from "./sse-tap.js";
+import { createSseTap } from "./sse-tap.js";
+import { mergeMeta, readProviderMeta, type Diagnosis, type ProviderMeta } from "../cache-aligner/diagnostics.js";
+import { countUrlFor, type CountAuth } from "../../4-savings-dashboard/token-ledger/count-sample.js";
 import { createTransformState, transformBody, type TransformOutcome, type TransformState } from "./transform.js";
 import { handleLedgerRequest } from "../../4-savings-dashboard/web/ledger-page.js";
 import { ledgerPath } from "../../core/paths.js";
@@ -22,9 +24,21 @@ export interface ProxyOptions {
   config?: SharlieConfig;
   anthropicBase?: string;
   openaiBase?: string;
+  geminiBase?: string;
   custom?: Record<string, string>;
   state?: TransformState;
-  onComplete?: (info: { outcome: TransformOutcome; usage?: Record<string, unknown>; status: number; requestId?: string }) => void;
+  onComplete?: (info: {
+    outcome: TransformOutcome;
+    usage?: Record<string, unknown>;
+    status: number;
+    requestId?: string;
+    preImage?: Buffer;
+    countUrl?: string;
+    auth?: CountAuth;
+    responseId?: string;
+    diagnosis?: Diagnosis;
+    startedAt?: number;
+  }) => void;
 }
 
 const HOP_RESPONSE = new Set(["connection", "keep-alive", "transfer-encoding", "content-encoding", "content-length"]);
@@ -87,6 +101,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, cfg: 
   const target = routePath(url.pathname, {
     anthropic: options.anthropicBase ?? "https://api.anthropic.com",
     openai: options.openaiBase ?? "https://api.openai.com",
+    gemini: options.geminiBase ?? "https://generativelanguage.googleapis.com",
     custom: { ...cfg.upstreams, ...options.custom },
     defaultProvider: cfg.defaultProvider,
   });
@@ -114,6 +129,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, cfg: 
   }
   headers.delete("host");
   headers.delete("content-length");
+  const auth: CountAuth = {
+    apiKey: headers.get("x-api-key") ?? undefined,
+    authorization: headers.get("authorization") ?? undefined,
+    googApiKey: headers.get("x-goog-api-key") ?? undefined,
+    anthropicVersion: headers.get("anthropic-version") ?? undefined,
+  };
+  const startedAt = Date.now();
+  const countUrl = countUrlFor(target.provider, target.url);
   const controller = new AbortController();
   let idle = setTimeout(() => controller.abort(), cfg.idleTimeoutMs);
   const touch = () => {
@@ -146,17 +169,27 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, cfg: 
   res.writeHead(upstream.status, responseHeaders);
   if (typeof res.socket?.setNoDelay === "function") res.socket.setNoDelay(true);
   res.flushHeaders?.();
+  const meta: ProviderMeta = {};
   const tap = createSseTap((event) => {
-    const usage = parseUsageEvent(event);
-    if (usage) lastUsage = usage;
+    try {
+      mergeMeta(meta, readProviderMeta(JSON.parse(event.data)));
+    } catch {
+      /* keep streaming if one event is not JSON */
+    }
   });
-  let lastUsage: Record<string, unknown> | undefined;
   const reader = upstream.body?.getReader();
+  const requestId = upstream.headers.get("request-id") ?? upstream.headers.get("x-request-id") ?? undefined;
   if (!reader) {
     clearTimeout(idle);
     res.end();
+    options.onComplete?.({
+      outcome, status: upstream.status, requestId, preImage: original, countUrl, auth, startedAt,
+    });
     return;
   }
+  const contentType = upstream.headers.get("content-type") ?? "";
+  const jsonMode = contentType.includes("json") && !contentType.includes("event-stream");
+  let jsonBuf = "";
   const decoder = new TextDecoder();
   try {
     while (true) {
@@ -164,20 +197,35 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, cfg: 
       if (done) break;
       touch();
       const buf = Buffer.from(value);
-      tap.push(decoder.decode(value, { stream: true }));
+      const text = decoder.decode(value, { stream: true });
+      tap.push(text);
+      if (jsonMode && jsonBuf.length < 8_000_000) jsonBuf += text;
       if (!res.write(buf)) await new Promise((resolve) => res.once("drain", resolve));
     }
   } catch {
     /* client abort or upstream cancel */
   } finally {
     tap.end();
+    if (jsonMode && jsonBuf.trim()) {
+      try {
+        mergeMeta(meta, readProviderMeta(JSON.parse(jsonBuf)));
+      } catch {
+        /* body was not a usage payload */
+      }
+    }
     clearTimeout(idle);
     res.end();
     options.onComplete?.({
       outcome,
-      usage: lastUsage,
+      usage: meta.usage,
       status: upstream.status,
-      requestId: upstream.headers.get("request-id") ?? upstream.headers.get("x-request-id") ?? undefined,
+      requestId,
+      preImage: original,
+      countUrl,
+      auth,
+      responseId: meta.responseId,
+      diagnosis: meta.diagnosis,
+      startedAt,
     });
   }
 }

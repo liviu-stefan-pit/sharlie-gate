@@ -21,6 +21,19 @@ export interface PlannedWrite {
   next: string;
 }
 
+/** Quote a path for cmd, PowerShell, and bash when it contains spaces or quotes. */
+export function quoteShell(value: string): string {
+  if (!/[\s"]/.test(value)) return value;
+  return `"${value.replaceAll('"', '\\"')}"`;
+}
+
+export function hookCommand(nodePath: string, binPath: string, args: string, shell: "cmd" | "bash" | "powershell"): string {
+  const node = quoteShell(nodePath);
+  const bin = quoteShell(binPath);
+  const exe = shell === "powershell" && node.startsWith('"') ? `& ${node}` : node;
+  return `${exe} ${bin} ${args}`;
+}
+
 export function planWrites(opts: InstallOptions): PlannedWrite[] {
   const writes: PlannedWrite[] = [];
   const mcp = { command: opts.nodePath, args: [opts.binPath, "mcp"] };
@@ -41,14 +54,15 @@ export function planWrites(opts: InstallOptions): PlannedWrite[] {
     if (!plugins.includes("sharlie-gate")) plugins = [...plugins, "sharlie-gate"];
     writes.push(jsonWrite(settingsPath, ["enabled_plugins"], plugins));
     if (opts.enforce) {
+      const cursorHook = (event: string) => hookCommand(opts.nodePath, opts.binPath, `hook cursor ${event}`, "cmd");
       writes.push({
         file: path.join(cursor, "hooks.json"),
         next: JSON.stringify({
           version: 1,
           hooks: {
-            beforeReadFile: [{ command: `${opts.nodePath} ${opts.binPath} hook cursor beforeReadFile` }],
-            preToolUse: [{ command: `${opts.nodePath} ${opts.binPath} hook cursor preToolUse` }],
-            postToolUse: [{ command: `${opts.nodePath} ${opts.binPath} hook cursor postToolUse` }],
+            beforeReadFile: [{ command: cursorHook("beforeReadFile") }],
+            preToolUse: [{ command: cursorHook("preToolUse") }],
+            postToolUse: [{ command: cursorHook("postToolUse") }],
           },
         }, null, 2),
       });
@@ -61,8 +75,8 @@ export function planWrites(opts: InstallOptions): PlannedWrite[] {
     writes.push({ file: path.join(copilot, "skills", "sharlie-gate-reader", "SKILL.md"), next: renderSkill() });
     const hookCmd = (event: string, timeoutSec: number) => ({
       type: "command",
-      bash: `node ${opts.binPath} hook copilot ${event}`,
-      powershell: `node "${opts.binPath}" hook copilot ${event}`,
+      bash: hookCommand(opts.nodePath, opts.binPath, `hook copilot ${event}`, "bash"),
+      powershell: hookCommand(opts.nodePath, opts.binPath, `hook copilot ${event}`, "powershell"),
       timeoutSec,
     });
     writes.push({

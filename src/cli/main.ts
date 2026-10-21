@@ -5,18 +5,21 @@ import { parseArgs } from "node:util";
 import { SERVER_VERSION, connectReader } from "../1-editor-helper-tools/mcp-server/server.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { startProxy } from "../2-traffic-gatekeeper/tunnel-connector/server.js";
+import { createTransformState } from "../2-traffic-gatekeeper/tunnel-connector/transform.js";
+import { recordProxyCompletion } from "../4-savings-dashboard/token-ledger/record.js";
 import { setBypass, isBypassed } from "../2-traffic-gatekeeper/tunnel-connector/control.js";
 import { Ledger } from "../4-savings-dashboard/token-ledger/db.js";
 import { footerLine, summary } from "../4-savings-dashboard/web/ledger-page.js";
 import { formatHeadline, signed } from "../4-savings-dashboard/token-ledger/money.js";
-import { binDir, dataDir, ledgerPath, manifestPath } from "../core/paths.js";
+import { binDir, dashboardPidPath, dataDir, homeDir, ledgerPath, manifestPath } from "../core/paths.js";
 import { log } from "../core/logger.js";
 import { detect } from "../installer/detect.js";
 import { applyWrites, planWrites } from "../installer/apply.js";
 import { readManifest, restore, writeManifest } from "../installer/manifest.js";
 import { installAutostart } from "../installer/autostart.js";
+import { purgeInstall } from "../installer/purge.js";
+import { openBrowser, openDashboard } from "../4-savings-dashboard/web/dashboard.js";
 import { safeCopilot, safeCursor } from "../hooks/copilot-hook.js";
-import { homeDir } from "../core/paths.js";
 import { ContentStore } from "../core/content-store.js";
 import { ensureSymbolRuntime } from "../1-editor-helper-tools/outline-builder/symbols/runtime.js";
 
@@ -32,6 +35,7 @@ const { values, positionals } = parseArgs({
     "legacy-vscode": { type: "boolean" },
     home: { type: "string" },
     port: { type: "string" },
+    purge: { type: "boolean" },
     suggest: { type: "boolean" },
     statusline: { type: "boolean" },
     cache: { type: "boolean" },
@@ -52,8 +56,25 @@ async function main(): Promise<void> {
     return;
   }
   if (command === "proxy") {
-    const handle = await startProxy({ port: values.port ? Number(values.port) : undefined });
+    const ledger = Ledger.open(ledgerPath());
+    const state = createTransformState();
+    ledger.attach(state);
+    const handle = await startProxy({
+      port: values.port ? Number(values.port) : undefined,
+      state,
+      onComplete: (info) => {
+        void recordProxyCompletion(ledger, state, info).catch((error) => {
+          log("warn", "ledger write failed", { error: String(error) });
+        });
+      },
+    });
     log("info", `listening ${handle.url}`);
+    const shutdown = () => {
+      ledger.close();
+      void handle.close().finally(() => process.exit(0));
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
     await new Promise(() => undefined);
     return;
   }
@@ -61,6 +82,10 @@ async function main(): Promise<void> {
   if (command === "uninstall") return uninstall();
   if (command === "doctor") return doctor();
   if (command === "status") return status();
+  if (command === "dashboard") {
+    await dashboard();
+    return;
+  }
   if (command === "ledger") {
     process.stdout.write(`ledger ${ledgerPath()}\nhttp://127.0.0.1:${values.port ?? 8080}/ledger\n`);
     return;
@@ -111,9 +136,31 @@ function init(): void {
 
 function uninstall(): void {
   const manifest = readManifest(manifestPath());
+  if (flagBool(values.purge)) {
+    purgeInstall({ dataDir: dataDir(), manifest, pidFile: dashboardPidPath() });
+    process.stdout.write("purged\n");
+    return;
+  }
   restore(manifest);
   writeManifest(manifestPath(), { version: 1, files: {} });
   process.stdout.write("uninstalled\n");
+}
+
+async function dashboard(): Promise<void> {
+  const session = await openDashboard({
+    ledgerFile: ledgerPath(),
+    port: flagString(values.port) ? Number(flagString(values.port)) : undefined,
+    pidFile: dashboardPidPath(),
+    open: openBrowser,
+  });
+  process.stdout.write(`dashboard ${session.url}\n`);
+  if (!session.started || !session.close) return;
+  const shutdown = () => {
+    void session.close?.().finally(() => process.exit(0));
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+  await new Promise(() => undefined);
 }
 
 function doctor(): void {
@@ -185,18 +232,13 @@ function runWrapped(): void {
 function tune(): void {
   const ledger = Ledger.open(ledgerPath());
   try {
-    const rows = ledger.db.prepare(
-      `SELECT ext, COUNT(*) AS folds,
-        SUM(CASE WHEN id IN (SELECT fold_event_id FROM expand_events WHERE fast_expand = 1) THEN 1 ELSE 0 END) AS fast
-       FROM fold_events GROUP BY ext`,
-    ).all() as { ext: string; folds: number; fast: number }[];
+    const rows = ledger.foldRates();
     if (!rows.length) {
       process.stdout.write("no fold events yet. Suggestions only; nothing is changed automatically.\n");
       return;
     }
     for (const row of rows) {
-      const rate = row.folds ? row.fast / row.folds : 0;
-      if (rate >= 0.9) process.stdout.write(`${row.ext}: expanded ${Math.round(rate * 100)}% of the time. Consider leaving this type expanded.\n`);
+      if (row.rate >= 0.9) process.stdout.write(`${row.ext}: expanded ${Math.round(row.rate * 100)}% of the time. Consider leaving this type expanded.\n`);
     }
   } finally {
     ledger.close();
@@ -214,7 +256,7 @@ function copyBundledAssets(fromFile: string, toFile: string): void {
 }
 
 function help(): void {
-  process.stdout.write("sharlie-gate <init|uninstall|doctor|mcp|proxy|status|ledger|hook|run|tune|bypass>\n");
+  process.stdout.write("sharlie-gate <init|uninstall|doctor|mcp|proxy|dashboard|status|ledger|hook|run|tune|bypass>\n");
 }
 
 function readStdin(): Promise<string> {

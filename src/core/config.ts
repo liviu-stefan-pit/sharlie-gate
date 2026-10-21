@@ -15,6 +15,8 @@ export const configSchema = z.object({
   bodyLimitBytes: z.number().int().positive().default(64 * 1024 * 1024),
   idleTimeoutMs: z.number().int().positive().default(10 * 60 * 1000),
   exactRawCount: z.boolean().default(true),
+  countSampleRate: z.number().min(0).max(1).default(0.1),
+  isolateCacheAccounting: z.boolean().default(false),
   contentStoreMaxBytes: z.number().int().positive().default(500 * 1024 * 1024),
   contentStoreTtlDays: z.number().int().positive().default(14),
   allowOutsideRoots: z.boolean().default(false),

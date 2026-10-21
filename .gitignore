@@ -2,6 +2,8 @@ node_modules/
 .cursor/
 dist/
 dist-types/
+installer/staging/
+installer/.cache/
 *.log
 .DS_Store
 coverage/

@@ -8,6 +8,7 @@ export interface FrozenDecision {
 
 export class DecisionTable {
   private readonly rows = new Map<string, FrozenDecision>();
+  onSet?: (key: string, decision: FrozenDecision) => void;
 
   constructor(seed: [string, FrozenDecision][] = []) {
     for (const [key, value] of seed) this.rows.set(key, value);
@@ -21,8 +22,14 @@ export class DecisionTable {
     return this.rows.get(key);
   }
 
+  /** Load a row that was already stored. Does not write it again. */
+  seed(key: string, decision: FrozenDecision): void {
+    this.rows.set(key, decision);
+  }
+
   set(key: string, decision: FrozenDecision): void {
     this.rows.set(key, decision);
+    this.onSet?.(key, decision);
   }
 
   entries(): [string, FrozenDecision][] {

@@ -56,8 +56,10 @@ export function account(input: AccountInput): AccountResult {
     - costPico(input.usage.cacheWrite1h, p.cacheWrite1hE6 - p.inputE6);
   const net = baseline - actualIn - D;
   const displayWould = costPico(input.rawTokens, p.inputE6);
-  const displayActual = actualIn + actualOut;
-  const displayNet = displayWould - displayActual - D;
+  // Input bill only. Output and thinking tokens are paid either way, so they stay in actualOut.
+  // C is cache the client would have hit without this gate, and is not claimed here.
+  const displayActual = actualIn;
+  const displayNet = displayWould - displayActual - D - C;
   return { sent, A, B, C, D, baselineNocache, baseline, actualIn, actualOut, net, displayWould, displayActual, displayNet, priced: true };
 }
 
